@@ -14,11 +14,13 @@ Including another URLconf
     1. Import the include() function: from django.conf.urls import url, include
     2. Add a URL to urlpatterns:  url(r'^blog/', include('blog.urls'))
 """
-from django.conf.urls import url, include
+from django.conf.urls import url
 from django.contrib import admin
+from home import views
 
-# CoolBlog的主路由
+# CoolBlog的从路由
 urlpatterns = [
     url(r'^admin/', admin.site.urls),
-    url(r'', include('home.urls')),
+    url(r'^$', views.index, name='index'),  # name是给url实例起的名字，匹配到home首页的网址为 r''+r'^$'=r'^$'
+
 ]
