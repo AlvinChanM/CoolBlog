@@ -1,0 +1,717 @@
+﻿
+
+<html class="no-js">
+<head>
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+    <meta name="keywords" content="" />
+    <meta name="description" content="phithon的小站，长期存在与分享关于网络安全与各种编程的原创文章。" />
+    <title>python http.server open redirect vulnerability | 离别歌</title>
+    <link rel="alternate" type="application/atom+xml" href="/feed/" title="离别歌" />
+    <link href="css/base.css" rel="stylesheet" type="text/css" />
+    <link href="css/style.css" rel="stylesheet" type="text/css" />
+    <script src="js/jquery-1.9.1.min.js"></script>
+    <script src="js/common_tpl.js" type="text/javascript"></script>
+    <link rel="shortcut icon" href="/static/deep/images/favicon.ico" />
+    
+<style>
+div.row .col-xs-4 {
+  float: left;
+  margin-left: 4px;
+}
+div.row .col-xs-4 img {
+  margin-left: 5px;
+}
+</style>
+<link href="css/jquery.fancybox.min.css" rel="stylesheet">
+<link rel="stylesheet" href="css/code.css">
+
+</head>
+<body>
+<!--[if lt IE 8]>
+    <div class="browsehappy" role="dialog">当前网页 <strong>不支持</strong> 你正在使用的浏览器. 为了正常的访问, 请 <a href="http://browsehappy.com/">升级你的浏览器</a>.</div>
+<![endif]-->
+<div id="header">
+    <div class="container">
+        <h1 class="h1-title">
+            <a href="/">
+               <img src="picture/logo.png" alt="离别歌" />
+            </a>
+        </h1>
+        <div id="nav">
+        <input type="checkbox" id="button">
+        <label for="button" onclick>菜单</label>
+        
+        <ul>
+            
+            <li class="item ">
+                <a href="/" >首页</a>
+            </li>
+            
+            <li class="item ">
+                <a href="/list/" >文章</a>
+            </li>
+            
+            <li class="item ">
+                <a href="/other/tinger.html" >关于</a>
+            </li>
+            
+            <li class="item ">
+                <a href="/other/friends-link.html" >友链</a>
+            </li>
+            
+            <li class="item ">
+                <a href="https://github.com/phith0n" target="_blank" >项目</a>
+            </li>
+            
+            <li class="item ">
+                <a href="https://www.leavesongs.com/PENETRATION/code-auditor-secret-group.html" >代码审计</a>
+            </li>
+            
+        </ul>
+        
+        </div>
+    </div>
+</div>
+
+<div class="banner-bar">
+    <div class="container">
+        <div class="col-12 columns">
+            <div class="place">
+                <a href="/">首页</a>
+                &raquo;
+                
+                网络安全 &raquo; <a href="/PENETRATION/python-http-server-open-redirect-vulnerability.html">python http.server open redirect vulnerability</a>
+                
+            </div>
+        </div>
+    </div>
+</div>
+<div class="container">
+    <div class="col-11 columns" id="mainbody" role="main">
+        <div class="post-single type-post">
+            <h1 class="article-h1">python http.server open redirect vulnerability</h1>
+            <div class="details-up">
+  <span class="author">作者: phithon</span>
+  
+  <span class="category">分类: <a href="/sort/PENETRATION">网络安全</a></span>
+  
+  <span class="date">时间: 2018-1-2 21:35</span>
+  <span class="comments-top" itemprop="interactionCount">评论：<a itemprop="discussionUrl" href="/PENETRATION/python-http-server-open-redirect-vulnerability.html#reply-list">10条评论</a></span>
+  <span class="comments-top" itemprop="interactionCount">浏览：<a itemprop="discussionUrl" href="/PENETRATION/python-http-server-open-redirect-vulnerability.html">2484人看过</a></span>
+  
+  <span class="date">标签:
+    
+        <a href="/tag/URL%E8%B7%B3%E8%BD%AC%E6%BC%8F%E6%B4%9E">URL跳转漏洞</a>
+    
+        <a href="/tag/python%E5%AE%89%E5%85%A8">python安全</a>
+    
+        <a href="/tag/web.py">web.py</a>
+    
+  </span>
+  
+</div>
+            <div class="entry">
+                <p>Github账号被封了以后，Vulhub也无法继续更新了，余下很多时间，默默看了点代码，偶然还能遇上一两个漏洞，甚是有趣。</p>
+<p>这个漏洞出现在python核心库http中，发送给官方团队后被告知撞洞了，且官方也认为需要更多人看看怎么修复这个问题，所以我们来分析一下。</p>
+<h2 id="0x01-httpserver"><a class="toclink" href="#0x01-httpserver">0x01 http.server库简单分析</a></h2>
+<p>众所周知Python有一个一键启动Web服务器的方法：</p>
+<div class="codehilite"><pre><span></span>python3 -m http.server
+</pre></div>
+
+
+<p>在任意目录执行如上命令，即可启动一个web文件服务器。其实这个方法就用到了<code>http.server</code>模块。这个模块包含几个比较重要的类：</p>
+<ol>
+<li><code>HTTPServer</code>这个类继承于<code>socketserver.TCPServer</code>，说明其实HTTP服务器本质是一个TCP服务器</li>
+<li><code>BaseHTTPRequestHandler</code>，这是一个处理TCP协议内容的Handler，目的就是将从TCP流中获取的数据按照HTTP协议进行解析，并按照HTTP协议返回相应数据包。但这个类解析数据包后没有进行任何操作，不能直接使用。如果我们要写自己的Web应用，应该继承这个类，并实现其中的<code>do_XXX</code>等方法。</li>
+<li><code>SimpleHTTPRequestHandler</code>，这个类继承于<code>BaseHTTPRequestHandler</code>，从父类中拿到解析好的数据包，并将用户请求的path返回给用户，等于实现了一个静态文件服务器。</li>
+<li><code>CGIHTTPRequestHandler</code>，这个类继承于<code>SimpleHTTPRequestHandler</code>，在静态文件服务器的基础上，增加了执行CGI脚本的功能。</li>
+</ol>
+<p>简单来说就是如下：</p>
+<div class="codehilite"><pre><span></span>+-----------+          +------------------------+    
+| TCPServer |          | BaseHTTPRequestHandler |
++-----------+          +------------------------+ 
+     ^                            |
+     |                            v
+     |                +--------------------------+
+     +----------------| SimpleHTTPRequestHandler |
+     |                +--------------------------+
+     |                            |
+     |                            v
+     |                 +-----------------------+
+     +-----------------| CGIHTTPRequestHandler |
+                       +-----------------------+
+</pre></div>
+
+
+<p>我们看看<code>SimpleHTTPRequestHandler</code>的源代码：</p>
+<div class="codehilite"><pre><span></span><span class="k">class</span> <span class="nc">SimpleHTTPRequestHandler</span><span class="p">(</span><span class="n">BaseHTTPRequestHandler</span><span class="p">):</span>
+    <span class="n">server_version</span> <span class="o">=</span> <span class="s2">&quot;SimpleHTTP/&quot;</span> <span class="o">+</span> <span class="n">__version__</span>
+
+    <span class="k">def</span> <span class="nf">do_GET</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Serve a GET request.&quot;&quot;&quot;</span>
+        <span class="n">f</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">send_head</span><span class="p">()</span>
+        <span class="k">if</span> <span class="n">f</span><span class="p">:</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">copyfile</span><span class="p">(</span><span class="n">f</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">wfile</span><span class="p">)</span>
+            <span class="k">finally</span><span class="p">:</span>
+                <span class="n">f</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+
+    <span class="c1"># ...</span>
+
+    <span class="k">def</span> <span class="nf">send_head</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">path</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">translate_path</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">path</span><span class="p">)</span>
+        <span class="n">f</span> <span class="o">=</span> <span class="bp">None</span>
+        <span class="k">if</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">isdir</span><span class="p">(</span><span class="n">path</span><span class="p">):</span>
+            <span class="n">parts</span> <span class="o">=</span> <span class="n">urllib</span><span class="o">.</span><span class="n">parse</span><span class="o">.</span><span class="n">urlsplit</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">path</span><span class="p">)</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">parts</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">endswith</span><span class="p">(</span><span class="s1">&#39;/&#39;</span><span class="p">):</span>
+                <span class="c1"># redirect browser - doing basically what apache does</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">send_response</span><span class="p">(</span><span class="n">HTTPStatus</span><span class="o">.</span><span class="n">MOVED_PERMANENTLY</span><span class="p">)</span>
+                <span class="n">new_parts</span> <span class="o">=</span> <span class="p">(</span><span class="n">parts</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">parts</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span> <span class="n">parts</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span> <span class="o">+</span> <span class="s1">&#39;/&#39;</span><span class="p">,</span>
+                             <span class="n">parts</span><span class="p">[</span><span class="mi">3</span><span class="p">],</span> <span class="n">parts</span><span class="p">[</span><span class="mi">4</span><span class="p">])</span>
+                <span class="n">new_url</span> <span class="o">=</span> <span class="n">urllib</span><span class="o">.</span><span class="n">parse</span><span class="o">.</span><span class="n">urlunsplit</span><span class="p">(</span><span class="n">new_parts</span><span class="p">)</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">send_header</span><span class="p">(</span><span class="s2">&quot;Location&quot;</span><span class="p">,</span> <span class="n">new_url</span><span class="p">)</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">end_headers</span><span class="p">()</span>
+                <span class="k">return</span> <span class="bp">None</span>
+            <span class="k">for</span> <span class="n">index</span> <span class="ow">in</span> <span class="s2">&quot;index.html&quot;</span><span class="p">,</span> <span class="s2">&quot;index.htm&quot;</span><span class="p">:</span>
+                <span class="n">index</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">index</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="n">index</span><span class="p">):</span>
+                    <span class="n">path</span> <span class="o">=</span> <span class="n">index</span>
+                    <span class="k">break</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">list_directory</span><span class="p">(</span><span class="n">path</span><span class="p">)</span>
+        <span class="c1"># ...</span>
+</pre></div>
+
+
+<p>前面HTTP解析的部分不再分析，如果我们请求的是GET方法，将会被分配到<code>do_GET</code>函数里，在<code>do_GET()</code>中调用了<code>send_head()</code>方法。</p>
+<p><code>send_head()</code>中调用了<code>self.translate_path(self.path)</code>将request path进行一个标准化操作，目的是获取用户真正请求的文件。如果这个path是一个已存在的目录，则进入if语句。</p>
+<p>如果用户请求的path不是以<code>/</code>结尾，则进入第二个if语句，这个语句中执行了HTTP跳转的操作，这就是我们当前漏洞的关键点了。</p>
+<h2 id="0x02-url"><a class="toclink" href="#0x02-url">0x02 任意URL跳转漏洞</a></h2>
+<p>如果我们请求的是一个已存在的目录，但PATH没有以<code>/</code>结尾，则将PATH增加<code>/</code>并用301跳转。</p>
+<p>这就涉及到了一个有趣的问题：在chrome、firefox等主流浏览器中，如果url以<code>//domain</code>开头，浏览器将会默认认为这个url是当前数据包的协议。比如，我们访问<code>http://example.com</code>，跳转到<code>//baidu.com/</code>，则浏览器会默认认为跳转到<code>http://baidu.com</code>，而不是跳转到<code>.//baidu.com/</code>目录。</p>
+<p>所以，如果我们发送的请求的是<code>GET //baidu.com HTTP/1.0\r\n\r\n</code>，那么将会被重定向到<code>//baidu.com/</code>，也就产生了一个任意URL跳转漏洞。</p>
+<p>在此前，由于目录<code>baidu.com</code>不存在，我们还需要绕过<code>if os.path.isdir(path)</code>这条if语句。绕过方法也很简单，因为<code>baidu.com</code>不存在，我们跳转到上一层目录即可：</p>
+<div class="codehilite"><pre><span></span><span class="err">GET //baidu.com/%2f.. HTTP/1.0\r\n\r\n</span>
+</pre></div>
+
+
+<p>如何测试这个漏洞呢？其实也很简单，直接用<code>python3 -m http.server</code>启动一个HTTP服务器即可。访问<code>http://127.0.0.1:8000//example.com/%2f%2e%2e</code>即可发现跳转到了<code>http://example.com/%2f../</code>。</p>
+<p><a href="/media/attachment/2018/01/02/66d8725d-435a-49f8-be33-94d9dfd1dcc3.jpg"><img alt="15148992607967.jpg" src="picture/66d8725d-435a-49f8-be33-94d9dfd1dcc3.128e72e293ce.jpg" /></a></p>
+<h2 id="0x03-webpyurl"><a class="toclink" href="#0x03-webpyurl">0x03 web.py任意URL跳转漏洞</a></h2>
+<p>那么，虽然说python核心库存在这个漏洞，不过通常情况下不会有人直接在生产环境用<code>python -m http.server</code>。</p>
+<p>Python框架web.py在处理静态文件的代码中继承并使用了<code>SimpleHTTPRequestHandler</code>类，所以也会受到影响。</p>
+<p>我们可以简单测试一下，我们用web.py官网的示例代码创建一个web应用：</p>
+<div class="codehilite"><pre><span></span><span class="kn">import</span> <span class="nn">web</span>
+
+<span class="n">urls</span> <span class="o">=</span> <span class="p">(</span>
+    <span class="s1">&#39;/(.*)&#39;</span><span class="p">,</span> <span class="s1">&#39;hello&#39;</span>
+<span class="p">)</span>
+<span class="n">app</span> <span class="o">=</span> <span class="n">web</span><span class="o">.</span><span class="n">application</span><span class="p">(</span><span class="n">urls</span><span class="p">,</span> <span class="nb">globals</span><span class="p">())</span>
+
+
+<span class="k">class</span> <span class="nc">hello</span><span class="p">:</span>
+    <span class="k">def</span> <span class="nf">GET</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">):</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">name</span><span class="p">:</span>
+            <span class="n">name</span> <span class="o">=</span> <span class="s1">&#39;World&#39;</span>
+        <span class="k">return</span> <span class="s1">&#39;Hello, &#39;</span> <span class="o">+</span> <span class="n">name</span> <span class="o">+</span> <span class="s1">&#39;!&#39;</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">app</span><span class="o">.</span><span class="n">run</span><span class="p">()</span>
+</pre></div>
+
+
+<p>然后模拟真实环境，创建一个static目录，和一些子目录：</p>
+<div class="codehilite"><pre><span></span>static
+├── css
+│   └── app.css
+└── js
+    └── app.js
+</pre></div>
+
+
+<p>运行后，直接访问<code>http://127.0.0.1:8080////static%2fcss%2f@www.example.com/..%2f</code>即可发现已成功跳转。</p>
+<p>web.py的具体分析我就不多说了，由于请求必须有<code>/static/</code>前缀，所以利用方法有些不同，不过核心原理也无差别。</p>
+            </div>
+            <div itemprop="keywords" class="tags-meta">
+                标签:
+                
+                    <a href="/tag/URL%E8%B7%B3%E8%BD%AC%E6%BC%8F%E6%B4%9E">URL跳转漏洞</a>
+                
+                    <a href="/tag/python%E5%AE%89%E5%85%A8">python安全</a>
+                
+                    <a href="/tag/web.py">web.py</a>
+                
+            </div>
+            <br>
+<!--MOB SHARE BEGIN-->
+<div class="-mob-share-ui-button -mob-share-open">分享</div>
+<div class="-mob-share-ui" style="display: none">
+    <ul class="-mob-share-list">
+        <li class="-mob-share-weibo"><p>新浪微博</p></li>
+        <li class="-mob-share-qzone"><p>QQ空间</p></li>
+        <li class="-mob-share-qq"><p>QQ好友</p></li>
+        <li class="-mob-share-weixin"><p>微信</p></li>
+        <li class="-mob-share-douban"><p>豆瓣</p></li>
+        <li class="-mob-share-facebook"><p>Facebook</p></li>
+        <li class="-mob-share-twitter"><p>Twitter</p></li>
+        <li class="-mob-share-pocket"><p>Pocket</p></li>
+        <li class="-mob-share-google"><p>Google+</p></li>
+        <li class="-mob-share-youdao"><p>有道云笔记</p></li>
+        <li class="-mob-share-mingdao"><p>明道</p></li>
+        <li class="-mob-share-tumblr"><p>Tumblr</p></li>
+        <li class="-mob-share-instapaper"><p>Instapaper</p></li>
+        <li class="-mob-share-linkedin"><p>LinkedIn</p></li>
+    </ul>
+    <div class="-mob-share-close">取消</div>
+</div>
+<div class="-mob-share-ui-bg"></div>
+<script id="-mob-share" src="js/mob-share.js"></script>
+<!--MOB SHARE END-->
+
+        <div class="qqlist">
+          <h3>订阅本站<small>(RSS)</small></h3>
+          <form method="post" target="_blank" action="https://list.qq.com/cgi-bin/qf_compose_send">
+          <input type="hidden" value="qf_booked_feedback" name="t" />
+          <input type="hidden" value="dace5c2b356504de449e7f3fc2bb59f3f6124d6563786446" name="id" />
+          <input type="text" placeholder="E-mail" value="" class="rsstxt" name="to" id="to" />
+          <button type="submit" >订阅&rarr;</button>
+          </form>
+        </div>
+
+
+        </div>
+        <div class="post-single type-post text-center">
+            <h3 style="margin-top: 0">喜欢这篇文章，扫码和我成为赞友！</h3>
+            <img src="picture/zan.jpg" alt="">
+        </div>
+        <!-- 评论位置 -->
+        <div id="comments" class="comments">
+          <h3>已有 10 条评论</h3>
+            <ol class="comment-list">
+            
+            
+              <li class="comment-body" id="comment-3006">
+                <div class="clearfix">
+                    <div class="comment-author">
+                        <img src="picture/d41d8cd98f00b204e9800998ecf8427e.jpg">
+                    </div>
+                    <div class="comment-meta">
+                    <div class="fn"><a href="" target="_blank">cxgreat2014</a></div>
+                    <p>第一句话心疼。。今天想起来您的mooder，准备研究学习一下，打开您的账户页面直接404了。。我还以为您改名了呢，原来是被封了。。/安慰   怎么github也学国内这套了。。</p>
+                    <span class="comment-time">时间: 2018-01-08 21:06</span>
+                    <span class="comment-reply"><a href="#comment-3006" onclick="reply_to('3006','cxgreat2014')">回复</a></span>
+                    </div>
+                </div>
+              </li>
+            
+              <li class="comment-body" id="comment-3004">
+                <div class="clearfix">
+                    <div class="comment-author">
+                        <img src="picture/d41d8cd98f00b204e9800998ecf8427e.jpg">
+                    </div>
+                    <div class="comment-meta">
+                    <div class="fn"><a href="" target="_blank">penetration</a></div>
+                    <p>&lt;script&gt;console.log(&#39;comment test&#39;)&lt;/script&gt;<br /><br />xss 测试 XD</p>
+                    <span class="comment-time">时间: 2018-01-07 16:44</span>
+                    <span class="comment-reply"><a href="#comment-3004" onclick="reply_to('3004','penetration')">回复</a></span>
+                    </div>
+                </div>
+              </li>
+            
+              <li class="comment-body" id="comment-3002">
+                <div class="clearfix">
+                    <div class="comment-author">
+                        <img src="picture/d41d8cd98f00b204e9800998ecf8427e.jpg">
+                    </div>
+                    <div class="comment-meta">
+                    <div class="fn"><a href="" target="_blank">tetst</a></div>
+                    <p>不允许301跳转后的Location中出现两个//，</p>
+                    <span class="comment-time">时间: 2018-01-04 11:17</span>
+                    <span class="comment-reply"><a href="#comment-3002" onclick="reply_to('3002','tetst')">回复</a></span>
+                    </div>
+                </div>
+              </li>
+            
+              <li class="comment-body" id="comment-3003">
+                <div class="clearfix">
+                    <div class="comment-author">
+                        <img src="picture/d41d8cd98f00b204e9800998ecf8427e.jpg">
+                    </div>
+                    <div class="comment-meta">
+                    <div class="fn"><a href="" target="_blank">tetst</a></div>
+                    <p>@tetst 或者跳转前把schema和host拼接上去</p>
+                    <span class="comment-time">时间: 2018-01-04 11:19</span>
+                    <span class="comment-reply"><a href="#comment-3003" onclick="reply_to('3003','tetst')">回复</a></span>
+                    </div>
+                </div>
+              </li>
+            
+              <li class="comment-body" id="comment-3001">
+                <div class="clearfix">
+                    <div class="comment-author">
+                        <img src="picture/d41d8cd98f00b204e9800998ecf8427e.jpg">
+                    </div>
+                    <div class="comment-meta">
+                    <div class="fn"><a href="" target="_blank">tetst</a></div>
+                    <p>http://127.0.0.1:8000//baidu.com/..  <br /><br />这样就能跳转</p>
+                    <span class="comment-time">时间: 2018-01-04 11:12</span>
+                    <span class="comment-reply"><a href="#comment-3001" onclick="reply_to('3001','tetst')">回复</a></span>
+                    </div>
+                </div>
+              </li>
+            
+              <li class="comment-body" id="comment-2997">
+                <div class="clearfix">
+                    <div class="comment-author">
+                        <img src="picture/d41d8cd98f00b204e9800998ecf8427e.jpg">
+                    </div>
+                    <div class="comment-meta">
+                    <div class="fn"><a href="" target="_blank">路人甲</a></div>
+                    <p>vulhub以后还会更新吗？挺喜欢这个项目的</p>
+                    <span class="comment-time">时间: 2018-01-03 10:42</span>
+                    <span class="comment-reply"><a href="#comment-2997" onclick="reply_to('2997','路人甲')">回复</a></span>
+                    </div>
+                </div>
+              </li>
+            
+              <li class="comment-body" id="comment-2996">
+                <div class="clearfix">
+                    <div class="comment-author">
+                        <img src="picture/d41d8cd98f00b204e9800998ecf8427e.jpg">
+                    </div>
+                    <div class="comment-meta">
+                    <div class="fn"><a href="" target="_blank">xfkxfk</a></div>
+                    <p>http.server那个url跳转问题，我17年2月份报给python官方，现在还没啥回复。当时扫描了外网1010个目标有100个存在这个问题，但是感觉略鸡肋。</p>
+                    <span class="comment-time">时间: 2018-01-03 09:38</span>
+                    <span class="comment-reply"><a href="#comment-2996" onclick="reply_to('2996','xfkxfk')">回复</a></span>
+                    </div>
+                </div>
+              </li>
+            
+              <li class="comment-body" id="comment-3000">
+                <div class="clearfix">
+                    <div class="comment-author">
+                        <img src="picture/c4267eb6d17276fa31c547ac71611e90.jpg">
+                    </div>
+                    <div class="comment-meta">
+                    <div class="fn"><a href="https://www.leavesongs.com" target="_blank">phithon</a></div>
+                    <p>@xfkxfk 因为说不好修所以一直没修吧</p>
+                    <span class="comment-time">时间: 2018-01-03 14:43</span>
+                    <span class="comment-reply"><a href="#comment-3000" onclick="reply_to('3000','phithon')">回复</a></span>
+                    </div>
+                </div>
+              </li>
+            
+              <li class="comment-body" id="comment-2995">
+                <div class="clearfix">
+                    <div class="comment-author">
+                        <img src="picture/d41d8cd98f00b204e9800998ecf8427e.jpg">
+                    </div>
+                    <div class="comment-meta">
+                    <div class="fn"><a href="" target="_blank">路人甲</a></div>
+                    <p>不，vulhub……</p>
+                    <span class="comment-time">时间: 2018-01-03 09:02</span>
+                    <span class="comment-reply"><a href="#comment-2995" onclick="reply_to('2995','路人甲')">回复</a></span>
+                    </div>
+                </div>
+              </li>
+            
+              <li class="comment-body" id="comment-2994">
+                <div class="clearfix">
+                    <div class="comment-author">
+                        <img src="picture/d41d8cd98f00b204e9800998ecf8427e.jpg">
+                    </div>
+                    <div class="comment-meta">
+                    <div class="fn"><a href="https://github.com/chybeta" target="_blank">chybeta</a></div>
+                    <p>第一句话，甚是伤感，，</p>
+                    <span class="comment-time">时间: 2018-01-02 22:52</span>
+                    <span class="comment-reply"><a href="#comment-2994" onclick="reply_to('2994','chybeta')">回复</a></span>
+                    </div>
+                </div>
+              </li>
+            
+            
+            </ol>
+            
+        </div>
+
+        <div id="reply"></div>
+        <div id="comment-place">
+            <div id="comment-post" class="respond none-resize">
+             <div id="respond">
+                <h3 id="response">添加新评论</h3>
+                <form method="post" id="comment-form" role="form" action="#comments">
+                    <p>
+                        <label for="author" class="required">称呼</label>
+                        <input type="text" name="nickname" value="" placeholder="昵称" maxlength="64" required id="id_nickname" />
+                    </p>
+                    <p>
+                        <label for="mail">Email</label>
+                        <input type="text" name="email" value="" placeholder="邮箱（可留空）" maxlength="254" id="id_email" />
+                    </p>
+                    <p>
+                        <label for="url">网站</label>
+                        <input type="text" name="url" value="" placeholder="链接（可留空）" maxlength="200" id="id_url" />
+                    </p>
+                    <p>
+                        <label for="textarea" class="required">内容</label>
+                        <textarea name="content" cols="40" rows="6" required id="id_content">
+</textarea>
+                    </p>
+                    <p>
+                        <label style="float:left;">验证码</label>
+                        <div class="row" style="margin-top: 8px"><div class="col-xs-4"><input autocomplete="off" id="id_captcha_1" name="captcha_1" type="text" placeholder="验证码" /> <input id="id_captcha_0" name="captcha_0" type="hidden" value="13855dc7c0a702332ec2fcb15ae59c95fbbee16e" />
+</div><div class="col-xs-4">
+<img src="picture/ebf3ed26b4754fc19870f0fb9f361135.gif" alt="captcha" class="captcha" height="25" /></div></div>
+                    </p>
+                    <p>
+                        <button type="submit" class="submit">提交评论</button>
+                        <input type="hidden" name="parent" id="id_parent" />
+                        <input type="hidden" name="archive" value="429" id="id_archive" />
+                        <input type='hidden' name='csrfmiddlewaretoken' value='gpeNGqYx9L7LXWD5sA223OJ6ociNzfkGRKiBhLadMg5HL3VCeOtkxlxLqzhkyhXx' />
+                    </p>
+                </form>
+                </div>
+            </div>
+        </div>
+
+    </div>
+    
+
+
+
+<div  class="col-5 columns" id="sidebar" role="complementary">
+
+  <div class="widget widget_search">
+    <h3>搜索</h3>
+    <form action="/search/" id="searchform" method="get">
+        <input type="text" id="searchkey" name="keyword" value="" class="searchkey" placeholder="Search..."/>
+        <button type="submit"  id="searchsubmit">Go</button>
+    </form>
+  </div>
+
+  
+  <div class="widget">
+	<h3 class="widget-title">最新评论</h3>
+	<ul class="widget-list" id="recent-comment">
+    
+    
+        <li id="comment" class="clearfix">
+            <img class="avatar" src="picture/4411b2c724e5bfe9f6cb500c7995b94d.jpg" alt="%s" width="40" height="40">
+            <div class="comments-link"><cite>sers</cite>：<a href="/PENETRATION/node-postgres-code-execution-vulnerability.html#comment-3007">大佬请教个问题 为什么用你给的代码
+&lt;tr&gt;&lt;th&gt;id&lt;/th&gt;&lt;td&gt;${res.row...</a></div>
+        </li>
+    
+        <li id="comment" class="clearfix">
+            <img class="avatar" src="picture/d41d8cd98f00b204e9800998ecf8427e.jpg" alt="%s" width="40" height="40">
+            <div class="comments-link"><cite>cxgreat2014</cite>：<a href="/PENETRATION/python-http-server-open-redirect-vulnerability.html#comment-3006">第一句话心疼。。今天想起来您的mooder，准备研究学习一下，打开您的账户页面直接404了。。...</a></div>
+        </li>
+    
+        <li id="comment" class="clearfix">
+            <img class="avatar" src="picture/d41d8cd98f00b204e9800998ecf8427e.jpg" alt="%s" width="40" height="40">
+            <div class="comments-link"><cite>penetration</cite>：<a href="/PENETRATION/python-http-server-open-redirect-vulnerability.html#comment-3004">&lt;script&gt;console.log(&#39;comment test&#39;)&lt;/script&gt;
+...</a></div>
+        </li>
+    
+        <li id="comment" class="clearfix">
+            <img class="avatar" src="picture/d41d8cd98f00b204e9800998ecf8427e.jpg" alt="%s" width="40" height="40">
+            <div class="comments-link"><cite>tetst</cite>：<a href="/PENETRATION/python-http-server-open-redirect-vulnerability.html#comment-3002">不允许301跳转后的Location中出现两个//，</a></div>
+        </li>
+    
+        <li id="comment" class="clearfix">
+            <img class="avatar" src="picture/d41d8cd98f00b204e9800998ecf8427e.jpg" alt="%s" width="40" height="40">
+            <div class="comments-link"><cite>tetst</cite>：<a href="/PENETRATION/python-http-server-open-redirect-vulnerability.html#comment-3003">@tetst 或者跳转前把schema和host拼接上去</a></div>
+        </li>
+    
+    </ul>
+  </div>
+
+  <div class="widget widget-category">
+	<h3>分类</h3>
+	<ul id="blogsort" class="widget-list">
+    
+    
+    <li>
+        <a href="/sort/PENETRATION">网络安全<em>104</em></a>
+    </li>
+    
+    <li>
+        <a href="/sort/C">C/C++<em>32</em></a>
+    </li>
+    
+    <li>
+        <a href="/sort/PYTHON">Python<em>18</em></a>
+    </li>
+    
+    <li>
+        <a href="/sort/SHARE">资源分享<em>15</em></a>
+    </li>
+    
+    <li>
+        <a href="/sort/HTML">web前端<em>13</em></a>
+    </li>
+    
+    </ul>
+  </div>
+
+  <div class="widget widget-tag">
+	<h3>随机标签</h3>
+	<div class="tag-cloud">
+        
+        
+        <a rel="tag" href="/tag/flashxss">flashxss</a>
+        
+        <a rel="tag" href="/tag/IIS">IIS</a>
+        
+        <a rel="tag" href="/tag/%E5%A5%87%E6%8A%80%E6%B7%AB%E5%B7%A7">奇技淫巧</a>
+        
+        <a rel="tag" href="/tag/phpjiami">phpjiami</a>
+        
+        <a rel="tag" href="/tag/php">php</a>
+        
+        <a rel="tag" href="/tag/Mysql">Mysql</a>
+        
+        <a rel="tag" href="/tag/%E4%BB%BB%E6%84%8F%E6%96%87%E4%BB%B6%E5%88%A0%E9%99%A4">任意文件删除</a>
+        
+        <a rel="tag" href="/tag/webshell">webshell</a>
+        
+        <a rel="tag" href="/tag/php%E8%84%9A%E6%9C%AC%E5%AE%89%E5%85%A8">php脚本安全</a>
+        
+        <a rel="tag" href="/tag/pwnhub">pwnhub</a>
+        
+        <a rel="tag" href="/tag/%E9%81%8D%E5%8E%86%E7%9B%AE%E5%BD%95">遍历目录</a>
+        
+        <a rel="tag" href="/tag/writeup">writeup</a>
+        
+        <a rel="tag" href="/tag/xctf">xctf</a>
+        
+        <a rel="tag" href="/tag/fliter">fliter</a>
+        
+        <a rel="tag" href="/tag/ssl%E8%AF%81%E4%B9%A6">ssl证书</a>
+        
+        <a rel="tag" href="/tag/fckeditor">fckeditor</a>
+        
+        <a rel="tag" href="/tag/%E5%B9%B3%E8%A1%A1%E6%9D%83%E9%99%90">平衡权限</a>
+        
+        <a rel="tag" href="/tag/ipv6">ipv6</a>
+        
+        <a rel="tag" href="/tag/mail">mail</a>
+        
+        <a rel="tag" href="/tag/firefox">firefox</a>
+        
+        <a rel="tag" href="/tag/itoa">itoa</a>
+        
+        <a rel="tag" href="/tag/brainfuck">brainfuck</a>
+        
+        <a rel="tag" href="/tag/%E5%85%8D%E8%B4%B9">免费</a>
+        
+        <a rel="tag" href="/tag/apache">apache</a>
+        
+        <a rel="tag" href="/tag/open_basedir">open_basedir</a>
+        
+        <a rel="tag" href="/tag/ActiveX">ActiveX</a>
+        
+        <a rel="tag" href="/tag/%E5%8A%A8%E7%BD%91">动网</a>
+        
+        <a rel="tag" href="/tag/%E5%AE%BD%E5%AD%97%E7%AC%A6">宽字符</a>
+        
+        <a rel="tag" href="/tag/%E6%8F%90%E6%9D%83%E6%BC%8F%E6%B4%9E">提权漏洞</a>
+        
+        <a rel="tag" href="/tag/Bottle">Bottle</a>
+        
+    </div>
+  </div>
+
+  <div class="widget widget-recent-entries">
+	<h3 class="widget-title">热门日志</h3>
+	<ul id="hotlog" class="widget-list">
+    
+    
+        <li><a href="/PHP/phpdelfile.html">php遍历目录&amp;删除指定文件中指定内容</a></li>
+    
+        <li><a href="/THINK/banjia.html">博客搬家成功</a></li>
+    
+        <li><a href="/PENETRATION/vps-pentest.html">对自己VPS的一次安全检测</a></li>
+    
+        <li><a href="/C/CGIforC_1.html">C语言CGI编程入门(一)</a></li>
+    
+        <li><a href="/other/tinger.html">About.Me</a></li>
+    
+    </ul>
+  </div>
+  
+
+</div>
+</div>
+
+<div id="footer">
+	<!-- copyright -->
+	<div class="container">
+		<div class="row remove-bottom">
+			<div class="col-6 columns">
+			<h3>Little About</h3>
+			<p>Phithon 非强迫症小青年  <br>
+现居先 <br>
+爱好：种花、买书、收藏明信片 <br>
+欢迎各大组织收留 <br>
+E-mail：root@leavesongs.com </p>
+			</div>
+
+			<div class="col-10 columns">
+
+				<h3 class="mobile-hide">Follow me</h3>
+        <div id="social-links">
+          <a href="http://weibo.com/101yx" class="sweibo" target="_blank" title="新浪微博">新浪微博</a>
+          <a href="javascript:alert(/没有腾讯微博哟/)" class="qweibo" target="_blank" title="腾讯微博">腾讯微博</a>
+          <a href="javascript:alert(/墙外有什么/);window.open('http://google.com')" class="google" target="_blank" title="墙外的世界">google+</a>
+          <a href="https://github.com/phith0n" class="github" target="_blank" title="Github">github</a>
+          <a href="javascript:confirm(/mailto:root#leavesongs.com/)" class="mail" target="_blank" title="私信给我">私信给我</a>
+          <a href="/feed/" target="_blank" class="rss" title="离别歌">RSS订阅</a>
+        </div>
+        <div class="bot-line"></div>
+				<p class="copyright">
+	Copyright &copy; Powered by talkbook
+				&nbsp;&nbsp;<i>Designed and built with all the love in the world by <a href="https://www.leavesongs.com" target="_blank">Phithon</a> && deepsky </i>
+                    <a href="/template/change/">更换模板</a>
+				</p>
+			</div>
+		</div>
+	</div>
+	<!-- /copyright -->
+</div>
+<a href="#" id="go-top">Top ↑</a>
+<script src="js/jquery.appear.js"></script>
+<script src="js/config.js"></script>
+<script>
+var _hmt = _hmt || [];
+(function() {
+  var hm = document.createElement("script");
+  hm.src = "https://hm.baidu.com/hm.js?ad9ab5e37c2811b9f0979e46123fc898";
+  var s = document.getElementsByTagName("script")[0]; 
+  s.parentNode.insertBefore(hm, s);
+})();
+</script>
+
+<script src="js/jquery.fancybox.pack.js"></script>
+<script>
+$(document).ready(function () {
+    $(".entry a").each(function (i, e) {
+        if(e.host != 'www.leavesongs.com') {
+            e.target = '_blank';
+        }
+    });
+    $(".entry img").each(function (i, e) {
+        if(e.parentNode.tagName.toUpperCase() != 'A') {
+            $(e).wrap('<a href="'+escapeHtml(e.src)+'" class="fancybox"></a>');
+        } else {
+            $(e.parentNode).addClass('fancybox');
+        }
+    });
+    $('.fancybox').fancybox();
+})
+</script>
+
+</body>
+
+</html>
