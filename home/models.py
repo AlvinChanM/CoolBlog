@@ -11,10 +11,24 @@ class Category(models.Model):
     # 分类名称
     name = models.CharField(max_length=50, verbose_name="分类名称")
 
+    def __str__(self):
+        return self.name
+
+    class Meta:
+        verbose_name = '分类'
+        verbose_name_plural = '分类列表'  # verbose_name
+
 
 class Tag(models.Model):
     # 名称
     name = models.CharField(max_length=50, verbose_name='标签名称')
+
+    def __str__(self):
+        return self.name
+
+    class Meta:
+        verbose_name = '标签'
+        verbose_name_plural = '标签列表'
 
 
 class Article(models.Model):
@@ -36,3 +50,10 @@ class Article(models.Model):
     author = models.ForeignKey(User, verbose_name='作者')
     # 浏览量 PositiveIntegerField正整数
     views = models.PositiveIntegerField(default=0, verbose_name='浏览量')
+
+    def __str__(self):
+        return self.title
+
+    class Meta:
+        verbose_name = '文章'
+        verbose_name_plural = '文章列表'
