@@ -13,6 +13,6 @@ class ArticleAdmin(admin.ModelAdmin):
     list_display = ['title', 'created_time', 'modified_time', 'category', 'author']
 
 
-admin.site.register(Article)
+admin.site.register(Article, ArticleAdmin)
 
 
